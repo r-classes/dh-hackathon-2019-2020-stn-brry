@@ -1,0 +1,1056 @@
+---
+title: '"Warning: Spoilers" IMDB project'
+author: 'Anastasiya Kostyanitsyna'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Очень крутое описание проекта
+
+[IMDb](https://www.imdb.com/?ref_=nv_home) - крупнейшая в мире база данных и веб-сайт о кинематографе. IMDb предоставляет пользователям возможность не только узнать о новинках кинематографа, найти информацию об интересующих фильмах, сериалах, личностях, связанных с кино, но найти чарты, рейтинги, отзывы для более чем 4,7 млн кинофильмов и телесериалов. Последнее и является предметом этого проекта. Особенностью отзывов на IMDb является пометка "Warning: Spoilers", которая предупреждает читателя, о наличии в тексте раскрытия сюжета.
+
+<b>Спойлерские отзывы </b></br>
+Текст отзывов, который содержат в себе спойлеры, сначала скрыт, для того, чтобы прочитать его, необходимо его дополнительно раскрыть. При желании можно скрыть все подобные отзывы нажатием кнопки "Hide Spoilers".
+Пометку о наличии спойлера пользователь устанавливает сам. Если он этого не сделал, то по правилам imdb, отзыв удаляется. 
+
+Несмотря на то, что спойлеры, особенно в сети, считаются нежелательными, люди все равно оставляют такие отзывы. Интересно исследовать на "причины" их написания.
+
+<b>Будем проверять следующие гипотезы:</b>
+
+* Больше просмотров будет у отзывов с низкой оценкой
+* Отзывы со спойлерами будут иметь меньше просмотров
+* Спойлеры скорее будут писаться к фильмам/сериалам, которые не понравились пользователю (низкая оценка фильма)
+* Спойлеры скорее будут писаться к сериалам
+* Спойлеры скорее будут писаться к фильмам с низким рейтингом
+* Чем старше фильм, тем вероятнее наличие спойлеров
+
+Также посмотрим на слова, характерные для спойлерских отзывов и для отзывов с разными оценками.
+
+
+<b>Данные</b></br>
+
+Сначала был сформирован список фильмов и сериалов, у которых в дальнейшем были собраны ревью.
+
+Основой послужили следующие чарты:
+
+* [Top Rated Movies](https://www.imdb.com/chart/top/?ref_=nv_mv_250)
+* [Top Rated TV Shows](https://www.imdb.com/chart/toptv?pf_rd_m=A2FGELUUNOQJNL&pf_rd_p=4da9d9a5-d299-43f2-9c53-f0efa18182cd&pf_rd_r=73QA8Y6653GQRM4X14BG&pf_rd_s=right-4&pf_rd_t=15506&pf_rd_i=top&ref_=chttp_ql_6)
+* [Lowest Rated Movies](https://www.imdb.com/chart/bottom?pf_rd_m=A2FGELUUNOQJNL&pf_rd_p=4da9d9a5-d299-43f2-9c53-f0efa18182cd&pf_rd_r=4TQ6PXVF74B8R78J5V91&pf_rd_s=right-4&pf_rd_t=15506&pf_rd_i=toptv&ref_=chttvtp_ql_8)
+* [Lowest Rated TV Shows](https://www.imdb.com/list/ls062374418/)
+
+Для того, чтобы проверить теорию о том, что спойлеры скорее будут писаться к фильмам с низким рейтингом, были взяты два типа данных Top Rated и Lowest Rated, а для того, чтобы проверить связь с типом картины (фильм/сериал), были взяты списки и фильмов и сериалов.
+
+Из каждого списка были выбраны случайным образом 100 названий (чтобы кол-во объектов в каждой категории было одинаковым). Далее были собраны отзывы и метаданные. Максимальное кол-во отзывов для каждого фильма и сериала - 25. Это связано с тем, что IMDb позволяет достатать только такое кол-во.   
+
+В итоге получилось 8382 отзыва.
+
+
+В ходе проекта были созданы следующие датасеты: 
+
+* датасеты для каждого из рейтингов с названиями фильмов и соответсвующими метаданными 
+* id_list - содержит id фильмов и то, к какому рейтингу они относятся
+* all_review_data - содержит отзывы и соответсвующие метаданные 
+
+
+## Пакеты
+```{r}
+suppressMessages(library(tidyverse))
+library(ggplot2)
+library(wesanderson)
+suppressMessages(library(gridExtra))
+library(packcircles)
+library(tidytext)
+library(stopwords)
+library(dplyr)
+suppressMessages(library(textstem))
+suppressMessages(library(reshape))
+library(ggpubr)
+
+options(warn=-1)
+set.seed(42)
+```
+
+## Загрузка данных
+```{r}
+filename <- "data/all_review_data100_3.csv"
+df <- read.delim(filename, sep='\t', header = TRUE)
+
+nr <- nrow(df)
+```
+
+Добавим в датесет информацию о рейтингах и типах произведения. Для этого сначала откроем датасет с рейтингами, из которых были взяты фильмы и сериалы, и достанем нужную информацию. 
+
+```{r}
+
+filename2 <- "data/id_list6.csv"
+df_tops <- read.delim(filename2, sep=',', header = TRUE)
+
+df_tops["movieid"] <- as.character(df_tops$movieid) 
+df["movie_id"] <- as.character(df$movie_id)
+
+#row.names(df_tops) <- df_tops$movieid
+#tops <- df_tops[df$movie_id,]$top_name
+#df['type'] <- str_match(tops, "(movies|tv)_")[,2]
+#df['top'] <- str_match(tops, "(low|top)_")[,2]
+
+
+# Обнаружила несоответвия в данных, поэтому пришлось переделать с циклом
+
+df['top'] <- rep(NA, nr)
+df['type'] <- rep(NA, nr)
+
+a <- unique(df$movie_id)
+
+for (id in a){
+  
+  l <- df_tops$top_name[df_tops$movieid == id]
+  
+  df$top[df$movie_id == id] <- str_match(l, "(low|top)_")[,2]
+  df$type[df$movie_id == id] <- str_match(l, "(movies|tv)_")[,2]
+}
+
+# df %>% filter(movie_id == 'tt0808240') %>% select(top)
+
+
+```
+
+Еще добавим год выхода фильма
+
+```{r}
+data_path <- "data/tops2"
+filenames <- list.files(data_path, pattern="*.csv", full.names=TRUE)
+
+movie_data <- list(id=c(), date=c())
+
+for (i in 1:4){
+  data <- read.delim(filenames[[i]], sep='\t', header = TRUE)
+  movie_data$id <- c(movie_data$id, as.character(data$ids))
+  movie_data$date <- c(movie_data$date, data$years)
+  movie_data$mov_rate <- c(movie_data$mov_rate, data$rates)
+}
+
+movie_data <- data.frame(movie_data)
+
+#df['year'] <- movie_data[df$movie_id,]$date
+#df['mov_rate'] <- movie_data[df$movie_id,]$mov_rate
+
+#write_delim(df, "data/full_review_dataset.csv", delim="\t")
+
+
+
+df['year'] <- rep(NA, nr)
+df['mov_rate'] <- rep(NA, nr)
+
+for (id in a){
+  
+  l <- movie_data[movie_data$id == id,]
+  
+  df$year[df$movie_id == id] <- l$date
+  df$mov_rate[df$movie_id == id] <- l$mov_rate
+}
+
+
+```
+
+
+Посмотрим на данные
+
+```{r}
+head(df %>% select("movie_id", "rate", "spoiler", "date", "user", "help_plus", "help_all"), 5)
+```
+
+
+Вообще отзыв пользователя о фильме на imdb содержит:
+
+* Заголовок
+* Дату
+* Имя пользователя 
+* Оценку пользователем фильма
+* Сам отзыв
+* Пометку о наличии спойлера
+* Оценку читателей
+
+<b>Что такое "Оценка читателя"?</b></br>
+Каждый зарегистрированный пользователь может оценить отзыв с точки зрения его полезности. Например, "37 out of 43 found this helpful". Это означает, что 43 человека оценили отзыв на фильм, и 37 из них сочли его полезным. В дальнейшем кол-во оценивших отзыв людей для удобства будем называть просмотрами. 
+
+Датасет содержит следующие данные: 
+
+* movie_id - id фильма
+* rate - оценка фильма пользователем
+* spoiler - наличие или отсутствие в отзыве спойлера (1/0)
+* date - дата написания отзыва
+* user - id пользователя
+* title - заголовок отзыва
+* link - id отзыва
+* text - текст отзыва
+* help_plus - число людей, оценивших отзыв положительно (helpfulness)
+* help_all - общее число людей, оценивших отзыв (просмотров)
+* type - фильм/сериал
+* top - low rated/high rated (рейтинг всех пользователей, не тех, кто писал отзыв!!)
+* year - год выхода фильма
+
+Для удобства сгруппируем данные по наличию или отсутсвию спойлера в отзыве
+```{r}
+spoil <- df %>% filter(spoiler == 1)
+no_spoil <- df %>% filter(spoiler == 0)
+```
+
+### Доля спойлеров
+
+Посмотрим на кол-во спойлеров в данных.
+
+```{r}
+
+df %>% select(spoiler)  %>% 
+       group_by(spoiler) %>% 
+       summarise(prop = scales::percent(n() / nr))
+
+```
+
+Так как для каждого фильма IMDb позволяет скачать только первые 25 комментариев (отсортированные, видимо, по helpfulness), мы не можем с точностью утвержать, является ли справедливым подобное соотношение для генеральной совокупности. 
+
+
+### Оценки пользователей
+```{r}
+
+df %>% 
+      select(rate, spoiler) %>%
+      group_by(spoiler) %>%
+      count(rate) %>% drop_na() %>% 
+    
+      ggplot(aes(x=factor(rate), y=n, fill=as.character(spoiler))) + 
+      geom_bar(position="stack", stat="identity") + 
+      scale_fill_manual("Отзыв", values=c("gray83", "skyblue2"),
+                        labels = c("Без спойлеров", "Со спойлерами")) +
+      geom_text(aes(label=n), vjust=0, color="black", size=2, position=position_stack(0.5)) + 
+      theme_minimal() + 
+      ggtitle("Кол-во оценкок пользователей, написавших отзыв, по группам ") +
+      xlab("Оценка из 10 баллов") + 
+      ylab("Кол-во")
+
+
+```
+
+Далее для подсчетов мы будем часто прибегать к двоичному представлению шкалы оценок. Будем считать, что 1-6 - негативная оценка фильма, а 7-10 - позитивная. Это разделение сделано на основе распределения итоговых рейтингов фильмов и чартов, из котрых были взяты данные. Как видно из графика ниже, оценки, которые характерны для top rated фильмов варьируются между 8-10, так как в данных нет ни одного фильма о рейтингом 7, будет считать, что подобная оценка попабает в раздел top rated.
+
+```{r}
+
+df['mov_rate'] <- round(df$mov_rate)
+
+df %>% 
+      select(top, mov_rate) %>%
+      group_by(top) %>%
+      count(mov_rate) %>% drop_na() %>% 
+    
+      ggplot(aes(x=factor(mov_rate), y=n, fill=top)) + 
+      geom_bar(position="stack", stat="identity") +
+      scale_fill_manual("Чарт", values=c("gray83", "skyblue2")) +
+      theme_minimal() + 
+      ggtitle("Оценки фильмов в зависимости от типа чарта") +
+      xlab("Оценка из 10 баллов") + 
+      ylab("Кол-во")
+
+```
+
+
+Процент спойлерских отзывов в рамках каждой оценки
+
+```{r}
+
+rate_count <- df %>% group_by(rate) %>% drop_na() %>% count()
+
+spoil %>% 
+      select(rate) %>% 
+      drop_na() %>% 
+      count(rate) %>%
+      mutate(per = n / rate_count$n * 100)
+
+```
+
+
+## Анализ
+
+###  Зависимость кол-ва просмотров комментария от оценки фильма рецензентом
+
+Кажется, что люди чаще читают негативные отзывы, чтобы понять будет ли им это интересно или нет.
+
+H0 - Зависимость нет </br>
+H1 - Зависимость есть
+
+```{r}
+# Функция, которая превращает вектор в бинарный
+
+bin_vals <- function(data, vec, val, res1=0, res2=1){
+  data['bin'] <- vec
+  data$bin[data$bin <= val] <- res1
+  data$bin[data$bin > val] <- res2
+  return(data)
+  }
+
+
+help_rates <- df %>% select(help_all, rate) %>% drop_na() 
+help_rates <- bin_vals(help_rates, help_rates$rate, 6)
+
+```
+
+Проверим данные на нормальность.
+
+``` {r}
+ggqqplot(help_rates$help_all)
+```
+
+Данные не распределены нормально. Данные количественные. В качестве теста будем использовать Критерий Манна-Уитни.
+
+```{r}
+
+# Функция рисует график плотности
+
+dens_plot <- function(data1, data2, name1, name2, alpha){
+  p <- ggplot() + 
+    geom_density(aes(x = data1, fill = name1), alpha = alpha) +
+    geom_density(aes(x = data2, fill = name2), alpha = alpha) +
+    theme_minimal()
+  return(p)
+}
+
+
+# Функция рисует гистограмму
+
+hist_plot <- function(data1, data2, name1, name2, alpha, bin){
+  p <- ggplot() + 
+    geom_histogram(aes(x = data1, fill = name1), bins = bin, alpha = alpha) +
+    geom_histogram(aes(x = data2, fill = name2), bins = bin, alpha = alpha) +
+    theme_minimal()+
+    scale_y_log10()
+  return(p)
+}
+
+
+# Функция рисует столбчатый график 
+
+bar_plot <- function(data1, data2, name1, name2, alpha){
+  p <- ggplot() + 
+    geom_bar(aes(x = data1, fill = name1), alpha = alpha) +
+    geom_bar(aes(x = data2 , fill = name2), alpha = alpha) +
+    theme_minimal()
+  return(p)
+}
+
+
+# Функция считает  Критерий Манна-Уитни и рисует график
+
+testing <- function(data1, data2, name1, name2, alpha, equal=F, plt='dens', bin=30){
+  
+  if (equal == T){
+    len <- length(data2)
+    data1 <- sample(data1, len)}
+  
+  test <- wilcox.test(data1, data2)
+  
+  if (plt == 'hist'){
+    p <- hist_plot(data1, data2, name1, name2, alpha, bin)}
+  
+  else if (plt == 'bar'){
+    p <- bar_plot(data1, data2, name1, name2, alpha)}
+ 
+  else if (plt == 'dens'){
+    p <- dens_plot(data1, data2, name1, name2, alpha)}
+  
+  return(list(test=test$p.value, plot=p))
+}
+
+
+```
+
+Проведем тесты
+
+```{r}
+
+p_help_rates <- help_rates %>% filter(bin == 1) %>% drop_na()
+n_help_rates <- help_rates %>% filter(bin == 0) %>% drop_na()
+
+res <- testing(p_help_rates$help_all, n_help_rates$help_all,
+               'положительная', 'отрицательная', 
+               0.3, plt='dens') 
+
+res$test
+
+```
+
+p-value = 0.8932284 </br>
+p-value > 0.05 </br>
+Следовательно мы не можем отвергануть H0. Зависимости между кол-вом просмотров комментария и оценки фильма рецензентом нет.
+
+```{r}
+
+res$plot +
+      ggtitle("График плотности кол-ва просмотров отзыва") +
+      xlab("Кол-во просмотров") + 
+      ylab("Плотность") +
+      scale_fill_discrete(name = "Оценка фильма")
+
+```
+
+
+### Зависимость кол-ва просмотров комментария от наличия спойлеров
+
+Кажется, что люди будут меньше смотреть комментарии со спойлерами, потому что никто не хочет себе испортить впечатление.
+
+H0 - Зависимость нет</br>
+H1 - Зависимость есть
+
+Данные остаются из предыдущего пункта, поэтому просто считаем результат
+
+```{r}
+
+s_help <- spoil %>% select(help_all) %>% drop_na()  
+n_help <- no_spoil %>% select(help_all) %>% drop_na() 
+
+res <- testing(n_help$help_all, s_help$help_all,
+               'без спойлеров', 'со спойлерами', 
+               0.3, plt='dens', ) 
+
+res$test
+
+```
+
+p-value = 2.48729e-07</br>
+p-value < 0.05 </br>
+Следовательно мы отвергаем H0. Зависимость между кол-вом просмотров комментария и наличием спойлеров есть. Но какая?
+
+```{r}
+
+res$plot +
+      ggtitle("График плотности кол-ва просмотров отзыва от наличия спойлера") +
+      xlab("Кол-во просмотров") + 
+      ylab("Плотность") +
+      scale_fill_discrete(name = "Наличие спойлера")
+
+```
+
+Видно, что отзывы со спойлерами просматриваются реже, чем отзывы без спойлеров. Посмотрим на медианы и средние. 
+
+```{r}
+# Функция красиво рисует значения медиан и средних 
+
+mean_median <- function(data1, data2, name1, name2, title){
+  
+  a <- lapply(list(data1, data2), mean)
+  b <- lapply(list(data1, data2), median)
+  labls <- round(c(unlist(b), unlist(a)))
+  
+  c <- as_tibble(list(labls=labls,
+                      x=rep(c(name1, name2), 2), 
+                      y=rep(c("mean", "median"), each=2)))
+  
+  p <- ggplot(data=c, aes(x=x, y=y)) +
+    geom_point(aes(color=factor(x)), size = labls/2) +
+    geom_text(label=labls, size=log(labls)*2, color="black")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank()) +
+    labs(title=title)
+  print(p)
+}
+
+
+mean_median(n_help$help_all, s_help$help_all,
+            "без спойлеров", "со спойлерами",
+            "График средних значений и медиан просмотров отзывов \n в зависимости от наличия спойлера")
+
+
+```
+
+Действительно, отзывы со спойлерами просматриваются в среднем реже. 
+
+
+###  Зависимость наличия спойлеров с оценкой фильма пользователем
+
+Кажется, что, если фильм человеку не понравился, он больше захочет наспойлерить его сюжет.
+
+H0 - Зависимость нет
+H1 - Зависимость есть
+
+Проверим данные на нормальность
+```{r}
+
+ggqqplot(df$rate)
+
+```
+
+Данные не распределены нормально. Данные порядковые качественные. В качестве теста будем использовать Критерий Манна-Уитни. Так как границы оценки определены заранее, выбросов тут быть не может.
+
+```{r}
+
+n_rate <- no_spoil %>% select(rate) %>% drop_na()
+s_rate <- spoil %>% select(rate) %>% drop_na()
+
+res <- testing(n_rate$rate, s_rate$rate,
+               'без спойлеров', 'со спойлерами', 
+               0.3, plt='dens')
+
+res$test
+
+```
+
+p-value = 7.515512e-10</br>
+p-value < 0.05 </br>
+Следовательно мы отвергаем H0. Зависимость между наличием спойлеров с оценкой фильма пользователем есть.
+
+```{r}
+
+res$plot +
+      ggtitle("График плотности просмотров отзыва в зависимости от оценки фильма") +
+      xlab("Оценка фильма") + 
+      ylab("Плотность") +
+      scale_fill_discrete(name = "Наличие спойлера") + 
+      scale_x_discrete(limits=1:10)
+
+
+```
+
+Вероятность высокой оценки фильма у отзыва без спойлеров больше, чем вероятность высокой оценки фильма у отзыва со спойлерами. Но пока непонятно, значимо ли это различие для совсем низких оценок. Возьмем только негативные отзывы и проверим влияние спойлеров там. 
+
+```{r}
+b_rate <- bin_vals(df, df$rate, 6)
+n_rate <- b_rate %>% filter(bin == 0) %>% drop_na()
+
+s_neg <- n_rate %>% filter(spoiler == 1) %>% drop_na()
+n_neg <- n_rate %>% filter(spoiler == 0) %>% drop_na()
+
+
+res <- testing(n_neg$rate, s_neg$rate,
+               'без спойлеров', 'со спойлерами', 
+               0.3, plt='hist', bin=6)
+
+res$test
+
+```
+
+p-value = 0.07312079</br>
+p-value > 0.05, однако p-value очень мало. Мы все равно будем считать, что мы не можем отвергнуть H0. Зависимость между наличием спойлеров с оценкой фильма ниже 6 нет. Следовательно просто будем говорить, что в отзывах с высокой оцененкой спойлеров меньше.
+
+```{r}
+
+res$plot +
+      ggtitle("Кол-во просмотров фильма для отзывов с оценкой <= 6") +
+      xlab("Оценка фильма") + 
+      ylab("Кол-во") +
+      scale_fill_discrete(name = "Наличие спойлера")
+
+```
+
+
+
+###  Зависимость спойлера от типа: тв шоу vs фильм
+
+Теперь посмотрим на зависимости написания спойлера от типа произведения (сериал или фильм). Кажется, что под сериалами будет больше спойлеров. Здесь уже будем использовать Хи-квадрат, так как данные качественные номинальные.
+
+Посмотрим как распределены данные по времени
+
+```{r}
+
+df %>% select(year, type) %>%
+        group_by(year, type) %>% 
+        count() %>%
+        arrange(year)  %>% 
+        ggplot() +
+        geom_point(aes(x=year, y=n, color=type), alpha=0.9, size=3) + 
+        theme_minimal() + 
+        scale_x_continuous(breaks = seq(1921, 2019, by = 10)) +
+        ggtitle("Количество фильмов и сериалов по годам выхода") +
+        xlab("Год") + 
+        ylab("Кол-во") +
+        scale_fill_discrete(name = "Наличие спойлера")
+
+```
+
+Анализ
+
+H0 - Зависимость нет</br>
+H1 - Зависимость есть
+
+```{r}
+
+s_type <- df %>% select(spoiler, type) %>% group_by(spoiler, type) %>% table()
+
+s_type
+```
+
+```{r}
+chisq.test(s_type)
+```
+
+p-value < 2.2e-16</br>
+p-value < 0.05 </br>
+Следовательно мы отвергаем H0. Зависимость между наличием спойлеров и типом произедения есть.
+
+```{r}
+
+bar_plot(no_spoil$type, spoil$type, 'без спойлеров', "со спойлерами", 0.3) +
+      ggtitle("График зависимости кол-ва спойлеров от типа произведения") +
+      xlab("Тип произведения") + 
+      ylab("Кол-во") +
+      scale_fill_discrete(name = "Наличие спойлера")
+
+```
+
+К фильмам спойлеров пишут больше.
+
+
+###  Зависимость спойлера от рейтинга фильма: high vs low 
+
+Кажется, что у фильмов с низким рейтингом будет больше спойлеров, потому что такие фильмы люди обычно смотрят ради веселье и особо не переживают из-за выданных сюжетных деталей.
+
+
+Посмотрим как распределены данные по времени
+
+```{r}
+
+df %>% select(year, top) %>%
+        group_by(year, top) %>% 
+        count() %>%
+        arrange(year)  %>% 
+        ggplot() +
+        geom_point(aes(x=year, y=n, color=top), alpha=0.9, size=3) + 
+        theme_minimal() + 
+        scale_x_continuous(breaks = seq(1921, 2019, by = 10)) +
+        ggtitle("Количество low rated и high rated произведений по годам выхода") +
+        xlab("Год") + 
+        ylab("Кол-во") +
+        scale_fill_discrete(name = "Наличие спойлера")
+
+```
+
+В последнее время стало очень много low rated произведений :))))
+
+Анализ
+
+H0 - Зависимость нет</br>
+H1 - Зависимость есть
+
+```{r}
+
+s_top <- df %>% select(spoiler, top) %>% group_by(spoiler, top) %>% table()
+
+s_top
+
+```
+```{r}
+chisq.test(s_top)
+```
+p-value = 0.2436</br>
+p-value > 0.05 </br>
+Следовательно мы не можем отвергнуть H0. Зависимости между наличием спойлеров и рейтингом нет
+
+```{r}
+
+bar_plot(no_spoil$top, spoil$top, 'без спойлеров', "со спойлерами", 0.3) +
+      ggtitle("График зависимости кол-ва спойлеров от рейтинга фильма") +
+      xlab("Тип рейтинга") + 
+      ylab("Кол-во") +
+      scale_fill_discrete(name = "Наличие спойлера")
+```
+
+
+###  Зависимость спойлера от времени выхода фильма 
+
+Кажется, что чем раньше вышел фильм, тем спойлеров к нему должно быть больше, потому что большинство уже должно было посмотреть фильм или знать его сюжет. 
+
+H0 - Зависимость нет</br>
+H1 - Зависимость есть
+
+Проверим на нормальность
+
+```{r}
+ggqqplot(df$year)
+```
+
+Данные не распределены нормально. Данные количественные. В качестве теста будем использовать Критерий Манна-Уитни.
+
+```{r}
+res <- testing(no_spoil$year, spoil$year,
+               'без спойлеров', 'со спойлерами', 
+               0.3, plt='dens', ) 
+
+res$test
+```
+
+p-value = 0.4336374</br>
+p-value > 0.05 </br>
+Следовательно мы не можем отвергнуть H0. Зависимости между наличием спойлеров и годом выхода фильма нет.
+
+```{r}
+
+res$plot +
+      ggtitle("График плотности даты выхода фильма в зависимости от наличия спойлеров в отзыве") +
+      xlab("Год выхода фильма") + 
+      ylab("Плотность") +
+      scale_fill_discrete(name = "Наличие спойлера")
+```
+
+###  Частотностные слова в заголовках отзывов
+
+Сравним 4 списка слов: заголовки отзывов с положительной оценкой (> 6), негативной (< 6) и со спойлерами и без. Предварительно лемматизируем и удалим стопслова.
+
+```{r}
+
+# Функция рисует график самых частотных слов
+
+top_n_words <- function(data, top){
+  
+  p <- data %>%
+  top_n(top) %>%
+    mutate(name = fct_reorder(word, n)) %>%
+    ggplot(aes(x=name, y=n)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=0.6, width=0.4) +
+    coord_flip() +
+    xlab("") +
+    theme_bw()
+  return(p)
+}
+
+#  Загружаем стопслова
+
+stops <- get_stopwords()
+filename <- "data/stops.csv"
+my_stops <- read.delim(filename, sep='\t', header = TRUE)
+stops <- rbind(stops, my_stops)
+
+
+b_rate['title'] <- as.character(df$title)
+spoil['title'] <- as.character(spoil$title)
+no_spoil['title'] <- as.character(no_spoil$title)
+
+bin_words <- b_rate %>% select(bin, title) %>% 
+      drop_na() %>%
+      unnest_tokens(word, title) %>% 
+      mutate(word = lemmatize_words(word)) %>%
+      count(bin, word, sort = TRUE) %>% 
+      anti_join(stops) 
+
+
+p1 <- bin_words %>% filter(bin == 1) %>%
+                    top_n_words(20) +
+                    ggtitle("Положительная оценка")
+
+p2 <- bin_words %>% filter(bin == 0) %>%
+                    top_n_words(20) +
+                    ggtitle("Отрицательная оценка")
+
+p3 <- spoil %>% select(title) %>% 
+      drop_na() %>%
+      unnest_tokens(word, title) %>% 
+      mutate(word = lemmatize_words(word)) %>%
+      count(word, sort = TRUE) %>% 
+      anti_join(stops)  %>%
+      top_n_words(20) +
+      ggtitle("Отзыв со спойлерами")
+
+p4 <- no_spoil %>% select(title) %>% 
+      drop_na() %>%
+      unnest_tokens(word, title) %>% 
+      mutate(word = lemmatize_words(word)) %>% 
+      count(word, sort = TRUE) %>% 
+      anti_join(stops)  %>%
+      top_n_words(20) +
+      ggtitle("Отзыв без спойлеров")
+
+
+
+grid.arrange(p1, p2, p3, p4, nrow=2)
+
+```
+
+Ну, в списках для заголовков отзывов со спойлерами и без разницы особо нет, кроме наличия слова "spoiler". А вот отзывы с разной оценкой отличаются. В отзывах пользователей, которые оценили фильмы ниже 6 баллов, встречаются такие сильно негативно окрашенные слова, как "bad", "awful", "terrible". В отзывах же с позитивной оценкой встречаются слова "good", "great", "masterpiece", "excellent", "amaze" (которое скорее всего amaze), что в принципе ожидаемо. 
+
+А что будет в нграммах?
+
+###  Частотностные bigrams в заголовках отзывов
+
+```{r}
+
+bin_words <- b_rate %>% select(bin, title) %>% 
+             drop_na() %>%
+             unnest_tokens(word, title, token = "ngrams", n = 2) %>% 
+             #separate(word, c("w1", "w2"), " ") %>% 
+            # mutate(w1 = lemmatize_words(w1)) %>%
+            # mutate(w2 = lemmatize_words(w2)) %>%
+            # mutate(word = str_c(w1," ", w2)) %>%
+             count(bin, word, sort = TRUE)
+
+
+# Убираем строчки, содержащие стоп слова
+swc <- paste(stops$word, collapse = "|")  
+bin_words <- bin_words[str_detect(bin_words$word, swc) == FALSE,] 
+
+
+p1 <- bin_words %>% filter(bin == 1) %>%
+                    top_n_words(20) +
+                    ggtitle("Положительная оценка")
+
+p2 <- bin_words %>% filter(bin == 0) %>%
+                    top_n_words(20) +
+                    ggtitle("Отрицательная оценка")
+
+grid.arrange(p1, p2, nrow=1)
+
+```
+
+Интересные результаты. В результаты попали упоминания десятилетий (80's, 90's), оценки зрителей (8/10, 0/10) и даже названия фильмов и сериалов ("speed 2" явно от need for speed, а "teen wolf" - название сериала)
+
+
+###  Частотностные слова в полных текстах отзывов без лемматизации
+
+```{r}
+
+b_rate['text'] <- as.character(df$text)
+spoil['text'] <- as.character(spoil$text)
+no_spoil['text'] <- as.character(no_spoil$text)
+
+bin_words <- b_rate %>% select(bin, text) %>% 
+      drop_na() %>%
+      unnest_tokens(word, text, token = "ngrams", n = 2) %>% 
+      count(bin, word, sort = TRUE) %>% 
+      anti_join(stops) 
+
+# Убираем строчки, содержащие стоп слова
+swc <- paste(stops$word, collapse = "|")  
+bin_words <- bin_words[str_detect(bin_words$word, swc) == FALSE,] 
+
+
+p1 <- bin_words %>% filter(bin == 1) %>%
+                    top_n_words(20) +
+                    ggtitle("Положительная оценка")
+
+p2 <- bin_words %>% filter(bin == 0) %>%
+                    top_n_words(20) +
+                    ggtitle("Отрицательная оценка")
+
+
+grid.arrange(p1, p2, ncol=2)
+
+
+```
+
+Вполне ожидаемые результаты.
+
+В отзывах с положительной оценкой достаточно частотно выражение "red shoes". Немного старнно. Узнаем что это и откуда.
+
+```{r}
+
+movies <- df$movie_id[str_detect(df$text, "red shoes") == TRUE]
+
+unique(movies)
+
+```
+
+```{r}
+length(movies)
+```
+
+Это словосочетание встречается в 6 отзывах только под одним фильмом под id tt0040725. И это фильм под названием "The Red Shoes" :)
+
+
+###  Оценки в текстах отзывов
+
+Списки частотных слов, в которых встретились оценки фильмов, навели меня на мысль, всегда ли оценка у отзыва (та, что отображается у самого комментария со знаком звездочки) совпадает с тем, как люди оценивают фильм в самом текст отзыва, если нет, то что более характерно: увеличение первоначальной оценки или уменьшение. Для того, чтобы проверить эту теорию, найдем все последовательности вида "8/10", "4/5" и тд. в текстах отзывов и в заголовках и посмотрим на разницу значений. 
+
+```{r}
+
+# Функция достает рейтинги из текстов
+
+find_rate <- function(line, reg){
+  a <- str_match(line, "(?:(-?[0-9]+(?:\\.[0-9])?)|([0-9]+)-[0-9]+)/((?:10+|5)(?:\\.0)?)")
+  res <-rep(NA, nrow(a))
+  res[which(!is.na(a[,2]))] <- as.integer(a[,2][which(!is.na(a[,2]))])
+  res[which(!is.na(a[,3]))] <- as.integer(a[,3][which(!is.na(a[,3]))])
+  return(list(val=res, out=as.integer(a[,4])))
+}
+
+rate_titl <- find_rate(df$title, reg)
+rate_text <- find_rate(df$text, reg)
+
+index_titl <- which(!is.na(rate_titl$val))
+index_text <- which(!is.na(rate_text$val))
+
+common <- intersect(index_titl, index_text)
+index <- index_text[!index_text %in% common]
+
+rate_titl$val[index] <- rate_text$val[index]
+rate_titl$out[index] <- rate_text$out[index]
+index_titl <- which(!is.na(rate_titl$val))
+
+missmatch <- which(rate_titl$val[index_titl] != df$rate[index_titl])
+
+new_rates <- data.frame(rate=df$rate[index_titl][missmatch],
+                text_rate=rate_titl$val[index_titl][missmatch],
+                out=rate_titl$out[index_titl][missmatch])
+
+head(new_rates)
+```
+
+Так как максимальное значение оценки в текстах может отличаться от 10, например, 4/5, посчитаем доли.
+
+```{r}
+new_rates['old'] <- new_rates$rate / 10
+new_rates['new'] <- new_rates$text_rate / new_rates$out
+
+summary(new_rates)
+```
+
+Видно, что оценки в текстах (text_rate) могут принимать не только больщие значения (10000000), но и отрицательные, что используется для передачи сильного недовольства или восторга фильма соответственно. Так как подобные значения будет очень сложно визуализировать, прошкалируем их следующим образом: тем оценкам, которые сильно привышают возможный range (1000/10), присвоем значение 11, чтобы отличать их от 10/10. Отрицательным аналогам (-1000/10) присвоем значение -1.
+ 
+
+```{r}
+
+ind <- new_rates$text_rate > 10 & new_rates$text_rate > new_rates$out
+new_rates$text_rate[ind] <- 11
+new_rates$out[ind] <- 10
+
+ind2 <- new_rates$text_rate < 0 & new_rates$text_rate < new_rates$out
+new_rates$text_rate[ind2] <- -1
+new_rates$out[ind2] <- 10
+
+new_rates['old'] <- new_rates$rate / 10
+new_rates['new'] <- new_rates$text_rate / new_rates$out
+
+new_rates <- new_rates[!(new_rates$old==new_rates$new),]
+new_rates["index"] <- 1:nrow(new_rates)
+
+```
+
+Чтобы понять, какая разница между оценками у отзыва и внутри текста, посчитаем разницу между двумя значениями. Если разница > 0, значит оценка фильма в тексте отзыва ниже, оценки у отзыва. Если разница < 0, оценка в тексте отзыва больше оценки у поста. 
+
+```{r}
+
+new_rates['dist'] <- new_rates$old - new_rates$new
+
+new_rates %>% ggplot(aes(x=index, y=dist)) +
+  geom_segment( aes(x=index, xend=index, y=0, yend=dist), color="grey") +
+  geom_point(size=0.5, color="orange") +
+  theme_light() +
+  ggtitle("График разницы между выставленной оценкой и оценкой в тексте отзыва") +
+  xlab("Отзыв") + 
+  ylab("Разница")
+
+```
+
+Видно, что отзывов, где оценка в тексте больше оценки у поста, больше.
+
+```{r}
+
+l1 <- length(new_rates$dist[new_rates$dist > 0]) # 220
+l2 <- length(new_rates$dist[new_rates$dist <= 0]) # 162
+
+paste("Разница > 0 =", l1,"; Разница < 0 =",l2)
+
+```
+
+Из проведенного эксперемента можно сделать вывод, что люди чаше оценивают фильмы выше, чем заданная шкала оценок, чем наоборот.
+
+###  Длины комментариев
+
+```{r}
+
+df['text'] <- as.character(df$text)
+df_len <- df %>% mutate(len = nchar(text)) %>% select(date, len)
+df_len['year'] <- str_extract(df_len$date, '[1-2]\\d{3}')
+
+
+df_len %>% 
+        ggplot(aes(x=year, y=len)) +
+        geom_boxplot() +
+        theme_minimal()+
+        ggtitle("График длин отзывов в каждый год ") +
+        xlab("Год") + 
+        ylab("Длина")
+
+```
+
+
+
+###  Активность пользователей
+А теперь сделаем красивый график с пользователи, которые оставляли отзывы. 
+
+```{r}
+
+users <- df %>% select(user) %>% table() 
+users <- data.frame(users)
+colnames(users) <- c("user", "n")
+
+packing <- circleProgressiveLayout(users$n, sizetype='area')
+users <- cbind(users, packing)
+dat.gg <- circleLayoutVertices(packing, npoints=50)
+
+users$user[users$n < 8] <- ""
+
+ggplot() + 
+
+  geom_polygon(data = dat.gg, aes(x, y, group = id, fill=as.factor(id)), 
+               colour = "black", alpha = 0.6) +
+
+  geom_text(data = users, aes(x, y, size=n/2, label = user)) +
+  scale_size_continuous(range = c(1,4)) +
+
+  theme_void() + 
+  theme(legend.position="none") +
+  coord_equal()
+
+
+```
+
+На графике за размер кружков отвечает кол-во отзывов, которое оставил пользователь. Видно, что есть люди, которые часто пишут отзывы.
+
+
+###  Заядлые спойлерщики
+
+```{r}
+
+act_us <- users %>% filter(n > 10) 
+act_us["user"] <- as.character(act_us$user)
+df["user"] <- as.character(df$user)
+
+
+df %>% filter(user %in% act_us$user) %>% 
+       group_by(user, spoiler) %>% count()  %>%
+       ggplot(aes(x=user, y=n, fill=as.character(spoiler))) + 
+       geom_bar(position="stack", stat="identity")+ 
+      scale_fill_manual("Отзыв", values=c("gray83", "skyblue2"),
+                        labels = c("Без спойлеров", "Со спойлерами")) +
+      geom_text(aes(label=n), vjust=0, color="black", size=2, position=position_stack(0.5)) + 
+      theme_minimal() + 
+      ggtitle("Кол-во отзывов пользователей в зависимости от наличия в нем спойлеров") +
+      xlab("Пользователь") + 
+      ylab("Кол-во")+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+```
+
+Есть пользователи, которые больше спойлерят, чем нет. 
+
+
+##  Итог
+
+Из 6 гипотез подтвердились 3, и 3 гипотезы опроверглись. 
+
+<b>+</b>
+
+* Отзывы со спойлерами будут иметь меньше просмотров 
+* Спойлеры скорее будут писаться к фильмам/сериалам, которые не понравились пользователю (можем утверждать про позитивную оценку)
+* Спойлеры скорее будут писаться к сериалам + (здесь зависимость нашли, но обратную)
+
+
+<b>-</b>
+
+* Больше просмотров будет у отзывов с низкой оценкой
+* Спойлеры скорее будут писаться к фильмам с низким рейтингом
+* Чем старше фильм, тем вероятнее наличие спойлеров
+
+
+
+
